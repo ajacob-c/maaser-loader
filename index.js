@@ -17,37 +17,65 @@ if (!USER_ID) {
   process.exit(1);
 }
 
-function parseDate(dateStr, monthYear) {
-  if (!dateStr) return null;
+function parseDate(dateStr, monthYear, worksheetYear) {
+  if (!dateStr) {
+    // Extract month from monthYear (e.g., "September '21" -> "September")
+    const month = monthYear.split("'")[0].trim();
+    return new Date(Date.UTC(worksheetYear, getMonthNumber(month) - 1, 1));
+  }
   
   try {
+    // If dateStr is already a Date object
+    if (dateStr instanceof Date) {
+      const month = dateStr.getUTCMonth() + 1; // JavaScript months are 0-based
+      const day = dateStr.getUTCDate();
+      return new Date(Date.UTC(worksheetYear, month - 1, day));
+    }
+    
     // If dateStr is just a month (e.g., "Nov"), use the 1st of the month
     if (dateStr.length <= 3) {
-      const [month, year] = monthYear.split("'");
-      const fullYear = '20' + year.trim();
-      return new Date(`${fullYear}-${dateStr}-01`);
+      return new Date(Date.UTC(worksheetYear, getMonthNumber(dateStr) - 1, 1));
     }
     
     // If dateStr is in format "DD-MMM" (e.g., "16-Nov")
     const [day, monthAbbr] = dateStr.split('-');
     if (day && monthAbbr) {
-      const [month, year] = monthYear.split("'");
-      const fullYear = '20' + year.trim();
-      return new Date(`${fullYear}-${monthAbbr}-${day}`);
+      return new Date(Date.UTC(worksheetYear, getMonthNumber(monthAbbr) - 1, parseInt(day)));
     }
     
     // If dateStr is a full date string
     const date = new Date(dateStr);
     if (!isNaN(date.getTime())) {
-      return date;
+      const month = date.getUTCMonth() + 1; // JavaScript months are 0-based
+      const day = date.getUTCDate();
+      return new Date(Date.UTC(worksheetYear, month - 1, day));
     }
     
-    console.log('Failed to parse date:', { dateStr, monthYear });
+    console.log('Failed to parse date:', { dateStr, monthYear, worksheetYear });
     return null;
   } catch (error) {
-    console.log('Error parsing date:', { dateStr, monthYear, error: error.message });
+    console.log('Error parsing date:', { dateStr, monthYear, worksheetYear, error: error.message });
     return null;
   }
+}
+
+// Helper function to convert month name/abbreviation to month number
+function getMonthNumber(monthStr) {
+  const months = {
+    'jan': 1, 'january': 1,
+    'feb': 2, 'february': 2,
+    'mar': 3, 'march': 3,
+    'apr': 4, 'april': 4,
+    'may': 5,
+    'jun': 6, 'june': 6,
+    'jul': 7, 'july': 7,
+    'aug': 8, 'august': 8,
+    'sep': 9, 'september': 9,
+    'oct': 10, 'october': 10,
+    'nov': 11, 'november': 11,
+    'dec': 12, 'december': 12
+  };
+  return months[monthStr.toLowerCase()] || 1;
 }
 
 function parseAmount(amountValue) {
@@ -89,10 +117,14 @@ async function processExcelFile() {
     
     // Process each sheet (year)
     for (const worksheet of workbook.worksheets) {
+      // Extract year from worksheet name (assuming format like "2024" or "24")
+      const worksheetYear = worksheet.name.replace(/\D/g, '');
+      const fullYear = worksheetYear.length === 2 ? `20${worksheetYear}` : worksheetYear;
+      
       let currentMonth = null;
       
       // Process each row
-      worksheet.eachRow((row, rowNumber) => {
+      worksheet.eachRow((row) => {
         // Skip empty rows
         if (!row || row.cellCount === 0) return;
         
@@ -114,12 +146,12 @@ async function processExcelFile() {
         }
         
         // Process income data if we have a valid row
-        if (rowData[2] && rowData[3] && rowData[4]) {
+        if (rowData[2] && rowData[3]) {
           const amount = parseAmount(rowData[2]);
           const source = rowData[3].toString().trim();
-          const date = rowData[4];
+          const date = parseDate(rowData[4], currentMonth, fullYear);
           
-          if (amount && source && date instanceof Date) {
+          if (amount && source && date) {
             const incomeData = {
               user: USER_ID,
               source,
@@ -134,12 +166,12 @@ async function processExcelFile() {
         }
         
         // Process tzedaka data if we have a valid row
-        if (rowData[7] && rowData[8] && rowData[9]) {
+        if (rowData[7] && rowData[8]) {
           const amount = parseAmount(rowData[7]);
           const organization = rowData[8].toString().trim();
-          const date = rowData[9];
+          const date = parseDate(rowData[9], currentMonth, fullYear);
           
-          if (amount && organization && date instanceof Date) {
+          if (amount && organization && date) {
             const tzedakaData = {
               user: USER_ID,
               organization,
